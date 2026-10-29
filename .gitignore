@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# OS / editor
+.DS_Store
+
+# Secrets & virtual envs (never commit)
+.env
+venv/
+.venv/
+
+# Facilitator-only — NEVER push to the shared/attendee repo
+solutions/
+facilitator/
+
+# Local LLM run outputs
+belts/black/generated/
+
+# White Belt generated test outputs — attendees create these LIVE in the room,
+# so your own practice runs shouldn't ship in the repo.
+belts/white/Claude_*.py
+belts/white/GPT_*.py
+belts/white/Gemini_*.py
+belts/white/round*.py
+belts/white/r[0-9]*.py
