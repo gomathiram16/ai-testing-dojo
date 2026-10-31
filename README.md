@@ -31,5 +31,3 @@ The tutorial's testing targets the **API**, not the page.
 - Discounts (Black Belt / unseen): `POST /orders/{id}/discount`
 
 Orders are associated with a caller via the optional `X-User` header.
-
-> **Attendees:** please don't open `solutions/` — that's the facilitator answer key.
