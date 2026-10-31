@@ -185,8 +185,12 @@ class LLMGenerator:
             "    order_id = client.post('/orders', json={'cart_id': cart_id}).json()['order_id']\n"
             "Then POST /orders/{order_id}/discount with {'code': ...}.\n"
             "MONEY: integer cents, INCLUDING 20% tax. Do NOT hard-code exact totals. Assert "
-            "INVARIANTS instead: total_cents >= 0; a valid code lowers the total vs no discount; "
-            "an invalid/unknown code returns 400; an unknown order_id returns 404."
+            "INVARIANTS instead: total_cents >= 0; an invalid/unknown code returns 400; an "
+            "unknown order_id returns 404.\n"
+            "To check a valid code LOWERS the total: capture before = client.get(f'/orders/"
+            "{order_id}').json()['total_cents'] BEFORE applying the discount, then assert the "
+            "discount response's total_cents < before. NEVER fetch the order again after "
+            "applying and compare it to the response (both are already discounted — that always fails)."
         ),
         "cart": (
             "FIXTURE — to get a cart, use EXACTLY:\n"
