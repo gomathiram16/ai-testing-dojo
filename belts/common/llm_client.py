@@ -27,8 +27,31 @@ except Exception:
 MODEL_ALIASES = {"opus": "claude-opus-5", "gpt": "gpt-6", "gemini": "gemini-3"}
 
 
+def _env(*names: str) -> str | None:
+    """First non-empty env var among several accepted names."""
+    for n in names:
+        v = os.getenv(n)
+        if v:
+            return v
+    return None
+
+
+# Accept our own names OR the common OpenRouter / OpenAI-style names, so a
+# gateway handed to you (e.g. OpenRouter) works without renaming the secrets.
+def _base_url() -> str | None:
+    return _env("DOJO_API_BASE_URL", "OPENROUTER_BASE_URL", "OPENAI_BASE_URL")
+
+
+def _api_key() -> str | None:
+    return _env("DOJO_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY")
+
+
+def _forced_model() -> str | None:
+    return _env("DOJO_MODEL", "OPENROUTER_MODEL")
+
+
 def gateway_configured() -> bool:
-    return bool(os.getenv("DOJO_API_BASE_URL") and os.getenv("DOJO_API_KEY"))
+    return bool(_base_url() and _api_key())
 
 
 def complete(prompt: str, model: str = "opus", system: str | None = None,
@@ -37,19 +60,19 @@ def complete(prompt: str, model: str = "opus", system: str | None = None,
     if not gateway_configured():
         raise RuntimeError(
             "LLM gateway not configured: set DOJO_API_BASE_URL and DOJO_API_KEY "
-            "(see facilitator/api_gateway.md), or use the offline/mock path."
+            "(or OPENROUTER_BASE_URL / OPENROUTER_API_KEY). See facilitator/api_gateway.md, "
+            "or use the offline/mock path."
         )
-    from openai import OpenAI  # LiteLLM gateway is OpenAI-compatible
+    from openai import OpenAI  # the gateway is OpenAI-compatible
 
-    client = OpenAI(base_url=os.environ["DOJO_API_BASE_URL"],
-                    api_key=os.environ["DOJO_API_KEY"])
+    client = OpenAI(base_url=_base_url(), api_key=_api_key())
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
-    # DOJO_MODEL lets you force a real model name (e.g. when pointing straight at
-    # OpenAI/Anthropic for a local test) without editing the aliases above.
-    model_name = os.getenv("DOJO_MODEL") or MODEL_ALIASES.get(model, model)
+    # DOJO_MODEL / OPENROUTER_MODEL force a specific model id; otherwise map the
+    # friendly alias (opus/gpt/gemini) to the configured model name.
+    model_name = _forced_model() or MODEL_ALIASES.get(model, model)
     params = {"model": model_name, "messages": messages,
               "temperature": temperature, "max_tokens": max_tokens}
 
