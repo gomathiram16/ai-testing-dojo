@@ -2,15 +2,20 @@
   "name": "AI Testing Dojo",
   "image": "mcr.microsoft.com/devcontainers/python:3.12",
   "postCreateCommand": "pip install --upgrade pip && pip install -r requirements.txt",
-  "forwardPorts": [8000],
+  "forwardPorts": [
+    8000
+  ],
   "portsAttributes": {
-    "8000": { "label": "DojoShop", "onAutoForward": "openBrowser" }
+    "8000": {
+      "label": "DojoShop",
+      "onAutoForward": "openBrowser"
+    }
   },
   "customizations": {
-    "vscode": { "extensions": ["ms-python.python"] }
-  },
-  "secrets": {
-    "DOJO_API_BASE_URL": { "description": "Base URL of the shared LLM gateway (OpenAI-compatible), e.g. https://your-gateway.example/v1" },
-    "DOJO_API_KEY": { "description": "Session-scoped key for the shared LLM gateway (issued by the facilitator)" }
+    "vscode": {
+      "extensions": [
+        "ms-python.python"
+      ]
+    }
   }
 }
