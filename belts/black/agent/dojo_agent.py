@@ -139,19 +139,65 @@ class LLMGenerator:
     # the dumb->sharper progression (set by main() from --staged).
     staged = False
 
-    # Round-by-round objectives for staged mode. Round 1 is deliberately shallow;
-    # each later round unlocks more. Rounds beyond the list reuse the last one.
-    STAGE_OBJECTIVES = [
-        "THIS ROUND: write ONLY happy-path tests — valid discount codes (e.g. SAVE10, "
-        "HALF, PCT30) on a normal order, asserting status 200 and the discounted total. "
-        "Do NOT test invalid input, boundaries, error paths, or percentages over 100.",
-        "THIS ROUND: add BOUNDARY and INVALID-INPUT tests — zero, negative percentages, "
-        "values just over 100 (PCT101, PCT150), unknown codes and unknown orders. Assert "
-        "the API should reject bad input and must never produce a negative total.",
-        "THIS ROUND: go ADVERSARIAL — very large percentages, malformed codes, and "
-        "INVARIANT checks (the order total must never go below zero; a rejected code must "
-        "not mutate the order).",
-    ]
+    # Round-by-round objectives for staged mode, PER TARGET. Round 1 is deliberately
+    # shallow; each later round unlocks more. Rounds beyond the list reuse the last.
+    STAGE_OBJECTIVES = {
+        "discounts": [
+            "THIS ROUND: write ONLY happy-path tests — valid discount codes (e.g. SAVE10, "
+            "HALF, PCT30) on a normal order, asserting status 200 and the discounted total. "
+            "Do NOT test invalid input, boundaries, error paths, or percentages over 100.",
+            "THIS ROUND: add BOUNDARY and INVALID-INPUT tests — zero, negative percentages, "
+            "values just over 100 (PCT101, PCT150), unknown codes and unknown orders. Assert "
+            "the API should reject bad input and must never produce a negative total.",
+            "THIS ROUND: go ADVERSARIAL — very large percentages, malformed codes, and "
+            "INVARIANT checks (the order total must never go below zero; a rejected code must "
+            "not mutate the order).",
+        ],
+        "cart": [
+            "THIS ROUND: write ONLY happy-path tests — create a cart, add a valid item with a "
+            "normal quantity (e.g. 1 or 2), and assert the cart contents and total. Do NOT "
+            "test invalid quantities, stock limits, deletion, or error paths.",
+            "THIS ROUND: add BOUNDARY and INVALID-INPUT tests — quantity of zero, negative "
+            "quantity, adding to a non-existent cart or product, and quantities that exceed "
+            "available stock. Assert the API should reject bad input.",
+            "THIS ROUND: go ADVERSARIAL and check INVARIANTS — the cart total must always "
+            "equal the sum of its line items (especially AFTER deleting an item), quantities "
+            "must be >= 1, and stock limits must hold.",
+        ],
+        "default": [
+            "THIS ROUND: write ONLY simple happy-path tests on valid inputs. Do NOT test "
+            "invalid input, boundaries, or error paths.",
+            "THIS ROUND: add BOUNDARY and INVALID-INPUT tests — zero, negatives, values past "
+            "the limits, and unknown ids. Assert the API should reject bad input.",
+            "THIS ROUND: go ADVERSARIAL and check INVARIANTS that must always hold.",
+        ],
+    }
+
+    # Exact fixture setup per target — so even a small/cheap model builds valid
+    # state instead of guessing endpoints or hard-coding tax-inclusive totals.
+    SETUP_RECIPE = {
+        "discounts": (
+            "FIXTURE — to get an order to discount, use EXACTLY this at the start of each test "
+            "(do not invent other ways to make an order):\n"
+            "    data.reset()\n"
+            "    cart_id = client.post('/carts').json()['cart_id']\n"
+            "    client.post(f'/carts/{cart_id}/items', json={'product_id': 2, 'quantity': 1})\n"
+            "    order_id = client.post('/orders', json={'cart_id': cart_id}).json()['order_id']\n"
+            "Then POST /orders/{order_id}/discount with {'code': ...}.\n"
+            "MONEY: integer cents, INCLUDING 20% tax. Do NOT hard-code exact totals. Assert "
+            "INVARIANTS instead: total_cents >= 0; a valid code lowers the total vs no discount; "
+            "an invalid/unknown code returns 400; an unknown order_id returns 404."
+        ),
+        "cart": (
+            "FIXTURE — to get a cart, use EXACTLY:\n"
+            "    data.reset()\n"
+            "    cart_id = client.post('/carts').json()['cart_id']\n"
+            "Add items with POST /carts/{cart_id}/items json={'product_id': 8, 'quantity': N}.\n"
+            "MONEY: integer cents incl. 20% tax. Do NOT hard-code totals. Assert INVARIANTS: "
+            "the cart total_cents equals the sum of line subtotal_cents; quantity 0 or negative "
+            "is rejected (400/422)."
+        ),
+    }
 
     def generate(self, target: str, findings: list[str], round_idx: int) -> str:
         from belts.common.llm_client import complete, gateway_configured
@@ -161,17 +207,20 @@ class LLMGenerator:
                 "DOJO_API_BASE_URL and DOJO_API_KEY (see facilitator/api_gateway.md)."
             )
         # Give the model the module actually under test, so it writes direct tests
-        # instead of trying to introspect the schema.
-        app_src = (REPO_ROOT / "app" / "main.py").read_text(encoding="utf-8")[:3000]
+        # instead of trying to introspect the schema. 'cart' etc. live in main.py
+        # (pass it whole — it's small); 'discounts' etc. live in app/unseen/.
+        app_src = (REPO_ROOT / "app" / "main.py").read_text(encoding="utf-8")[:6000]
         mod_path = REPO_ROOT / "app" / "unseen" / f"{target}.py"
         target_src = mod_path.read_text(encoding="utf-8")[:3500] if mod_path.exists() else ""
         feedback = ("\nAlso build on these prior failing tests: " + ", ".join(findings)) if findings else ""
 
         if self.staged:
-            objective = self.STAGE_OBJECTIVES[min(round_idx, len(self.STAGE_OBJECTIVES) - 1)]
+            objectives = self.STAGE_OBJECTIVES.get(target, self.STAGE_OBJECTIVES["default"])
+            objective = objectives[min(round_idx, len(objectives) - 1)]
         else:
-            objective = ("Probe boundaries, invalid input and error paths (e.g. percentages "
-                         "over 100, negatives, zero, unknown codes/ids).")
+            objective = ("Probe boundaries, invalid input and error paths — zero, negatives, "
+                         "values just past the limits, and unknown ids/codes.")
+        setup = self.SETUP_RECIPE.get(target, "")
 
         prompt = (
             f"Write ONE pytest module that tests the '{target}' area of this FastAPI app.\n"
@@ -184,7 +233,8 @@ class LLMGenerator:
             "- Do NOT introspect the OpenAPI schema. Do NOT write dynamic/meta/helper-heavy code.\n"
             "- Name every test function test_*. Keep the whole module short.\n"
             f"- {objective}\n"
-            f"{feedback}\n\n"
+            + (f"\n{setup}\n" if setup else "")
+            + f"{feedback}\n\n"
             f"app/main.py (excerpt):\n{app_src}\n\n"
             + (f"app/unseen/{target}.py (the module UNDER TEST — target your tests here):\n{target_src}\n"
                if target_src else "")
