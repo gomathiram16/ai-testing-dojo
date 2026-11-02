@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DojoShop</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+         background:#f6f7f9; color:#1c2024; }
+  header { background:#1f2a44; color:#fff; padding:16px 24px; }
+  header h1 { margin:0; font-size:22px; }
+  header p { margin:4px 0 0; font-size:12.5px; color:#b9c3d6; }
+  main { max-width:1000px; margin:0 auto; padding:20px; display:grid; grid-template-columns:1fr 300px; gap:20px; }
+  h2 { font-size:15px; color:#2a2f34; margin:0 0 12px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:14px; }
+  .card { background:#fff; border:1px solid #e6e8eb; border-radius:12px; padding:14px; display:flex; flex-direction:column; }
+  .thumb { height:120px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:46px; margin-bottom:10px; }
+  .cat { font-size:10.5px; text-transform:uppercase; letter-spacing:.4px; color:#8a929b; }
+  .name { font-weight:600; font-size:14px; margin:3px 0 6px; }
+  .price { font-size:18px; font-weight:700; }
+  .stock { font-size:11.5px; color:#6b7178; margin:2px 0 10px; }
+  .stock.out { color:#c0392b; }
+  button { border:0; border-radius:8px; padding:8px 12px; font-size:13px; font-weight:600; cursor:pointer; }
+  .add { background:#2fb37a; color:#fff; margin-top:auto; }
+  .add:disabled { background:#c9ced3; cursor:not-allowed; }
+  aside { background:#fff; border:1px solid #e6e8eb; border-radius:12px; padding:16px; align-self:start; position:sticky; top:20px; }
+  .line { display:flex; justify-content:space-between; font-size:13px; padding:6px 0; border-bottom:1px solid #f0f1f3; }
+  .line small { color:#8a929b; }
+  .total { display:flex; justify-content:space-between; font-weight:700; margin-top:10px; font-size:15px; }
+  .checkout { background:#1f6feb; color:#fff; width:100%; margin-top:12px; }
+  .empty { color:#8a929b; font-size:13px; }
+  .msg { background:#eef5ff; border:1px solid #cfe0ff; color:#20416e; border-radius:8px; padding:8px 10px; font-size:12.5px; margin-top:12px; }
+  footer { text-align:center; font-size:12px; color:#8a929b; padding:16px; }
+  footer a { color:#1f6feb; }
+  @media (max-width:760px){ main{grid-template-columns:1fr;} }
+</style>
+</head>
+<body>
+<header>
+  <h1>🛍️ DojoShop</h1>
+  <p>A demo store for the AI Testing Dojo — every click here is a real API call. Poke the raw API at <a href="/docs" style="color:#9ec2ff">/docs</a>.</p>
+</header>
+<main>
+  <section>
+    <h2>Products</h2>
+    <div class="grid" id="grid">Loading…</div>
+  </section>
+  <aside>
+    <h2>Your cart</h2>
+    <div id="cart"><div class="empty">Cart is empty — add something!</div></div>
+    <button class="checkout" id="checkoutBtn" onclick="checkout()" style="display:none">Checkout</button>
+    <div id="msg"></div>
+  </aside>
+</main>
+<footer>DojoShop is deliberately buggy — it's here to be tested, not trusted. 🥋</footer>
+<script>
+const money = c => '$' + (c/100).toFixed(2);
+let cartId = null;
+
+async function api(path, opts){
+  const r = await fetch(path, opts);
+  let data = null; try { data = await r.json(); } catch(e){}
+  return { status: r.status, data };
+}
+
+// Lightweight, offline-safe "product images": a category-tinted tile + emoji.
+// No external files, so nothing to break if the venue wifi does.
+const CAT_GRAD = {
+  "Computers":   "linear-gradient(135deg,#e3f0ff,#c9defa)",
+  "Electronics": "linear-gradient(135deg,#efe7ff,#ddc9fa)",
+  "Apparel":     "linear-gradient(135deg,#ffe9ef,#ffd0dd)",
+  "Books":       "linear-gradient(135deg,#e6f7ec,#c9f0d6)",
+  "Gift Cards":  "linear-gradient(135deg,#fff4d9,#ffe6a8)",
+};
+const EMOJI = {1:"🖥️",2:"💻",3:"🖥️",4:"📱",5:"📱",6:"👟",7:"👖",8:"📖",9:"📗",10:"🎁"};
+function thumbFor(p){
+  const grad = CAT_GRAD[p.category] || "linear-gradient(135deg,#eef0f3,#dfe3e8)";
+  return `<div class="thumb" style="background:${grad}">${EMOJI[p.id] || "🛍️"}</div>`;
+}
+
+async function loadProducts(){
+  const { data } = await api('/products');
+  const grid = document.getElementById('grid');
+  grid.innerHTML = '';
+  (data || []).forEach(p => {
+    const out = p.stock <= 0;
+    const el = document.createElement('div');
+    el.className = 'card';
+    el.innerHTML =
+      thumbFor(p) +
+      `<div class="cat">${p.category}</div>
+       <div class="name">${p.name}</div>
+       <div class="price">${money(p.price_cents)}</div>
+       <div class="stock ${out?'out':''}">${out ? 'Out of stock' : p.stock + ' in stock'}</div>`;
+    const btn = document.createElement('button');
+    btn.className = 'add'; btn.textContent = 'Add to cart';
+    btn.onclick = () => addToCart(p.id);
+    el.appendChild(btn);
+    grid.appendChild(el);
+  });
+}
+
+async function addToCart(productId){
+  if (!cartId){
+    const res = await api('/carts', { method:'POST' });
+    cartId = res.data.cart_id;
+  }
+  await api(`/carts/${cartId}/items`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ product_id: productId, quantity: 1 })
+  });
+  refreshCart();
+}
+
+async function refreshCart(){
+  const cartDiv = document.getElementById('cart');
+  const checkoutBtn = document.getElementById('checkoutBtn');
+  if (!cartId){ cartDiv.innerHTML = '<div class="empty">Cart is empty — add something!</div>'; checkoutBtn.style.display='none'; return; }
+  const { data } = await api(`/carts/${cartId}`);
+  if (!data || !data.items || data.items.length === 0){
+    cartDiv.innerHTML = '<div class="empty">Cart is empty — add something!</div>';
+    checkoutBtn.style.display = 'none';
+    return;
+  }
+  cartDiv.innerHTML = data.items.map(i =>
+    `<div class="line"><span>${i.name} <small>×${i.quantity}</small></span><span>${money(i.subtotal_cents)}</span></div>`
+  ).join('') + `<div class="total"><span>Total</span><span>${money(data.total_cents)}</span></div>`;
+  checkoutBtn.style.display = 'block';
+}
+
+async function checkout(){
+  if (!cartId) return;
+  const { data } = await api('/orders', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ cart_id: cartId })
+  });
+  document.getElementById('msg').innerHTML =
+    `<div class="msg">✅ Order #${data.order_id} placed — subtotal ${money(data.subtotal_cents)}, tax ${money(data.tax_cents)}, total <b>${money(data.total_cents)}</b>.</div>`;
+  cartId = null;
+  refreshCart();
+}
+
+loadProducts();
+</script>
+</body>
+</html>
